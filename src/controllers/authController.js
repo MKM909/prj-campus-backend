@@ -139,17 +139,17 @@ const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const googleSignIn = async (req, res) => {
-  const { id_token } = req.body;
+  const idToken = req.body.id_token || req.body.idToken;
 
-  if (!id_token) {
+  if (!idToken) {
     return res.status(400).json({ status: 'error', message: 'Google ID Token is required' });
   }
 
   try {
     // 1. Verify the Google ID Token
     const ticket = await googleClient.verifyIdToken({
-      idToken: id_token,
-      // audience: process.env.GOOGLE_CLIENT_ID, // Specify the CLIENT_ID of the app that accesses the backend
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID
     });
     
     const payload = ticket.getPayload();
@@ -229,4 +229,3 @@ module.exports = {
   loginUser,
   googleSignIn
 };
-

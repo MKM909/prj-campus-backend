@@ -131,3 +131,44 @@ WITH CHECK (user_id = auth.uid());
 ALTER PUBLICATION supabase_realtime ADD TABLE public.chats;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_participants;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
+
+-- ADMIN ANNOUNCEMENTS
+
+CREATE TABLE IF NOT EXISTS public.announcements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  priority TEXT DEFAULT 'normal' CHECK (priority IN ('normal', 'important', 'urgent')),
+  audience_role TEXT DEFAULT 'all' CHECK (audience_role IN ('all', 'student', 'staff', 'security', 'admin')),
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  is_active BOOLEAN DEFAULT true,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_announcements_created_at ON public.announcements(created_at);
+CREATE INDEX IF NOT EXISTS idx_announcements_audience ON public.announcements(audience_role);
+
+ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "announcements_select" ON public.announcements
+FOR SELECT TO authenticated
+USING (
+  is_active = true
+  AND (expires_at IS NULL OR expires_at > now())
+);
+
+CREATE POLICY "announcements_insert_admin" ON public.announcements
+FOR INSERT TO authenticated
+WITH CHECK (
+  EXISTS (
+    SELECT 1
+    FROM public.users
+    WHERE users.id = auth.uid()
+    AND users.role = 'admin'
+  )
+);
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.reports;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.announcements;

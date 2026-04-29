@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { validationResult } = require('express-validator');
+const { emitRealtimeEvent } = require('../utils/realtimeHub');
 
 // @desc    Create a new report
 // @route   POST /api/reports
@@ -51,29 +52,36 @@ const createReport = async (req, res) => {
     // If anonymous, set user_id to null to hide identity, but we still used their score
     const finalUserId = isAnonymous ? null : authUserId;
 
+    const reportData = {
+      user_id: finalUserId,
+      zone_id: zoneId,
+      category,
+      title,
+      description,
+      photo_url: photoUrl,
+      is_anonymous: isAnonymous || false,
+      confidence_score: baseConfidence,
+      reliability_score: reliabilityScore,
+      ai_score: aiScore,
+      final_trust_score: finalTrustScore,
+      status: status,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    if (id) reportData.id = id;
+
     const { data: newReport, error } = await supabase
       .from('reports')
-      .insert([{
-        id: id || undefined, // Allow client-side generated UUIDs if provided
-        user_id: finalUserId,
-        zone_id: zoneId,
-        category,
-        title,
-        description,
-        photo_url: photoUrl,
-        is_anonymous: isAnonymous || false,
-        confidence_score: baseConfidence,
-        reliability_score: reliabilityScore,
-        ai_score: aiScore,
-        final_trust_score: finalTrustScore,
-        status: status,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }])
+      .insert([reportData])
       .select()
       .single();
 
     if (error) throw error;
+
+    emitRealtimeEvent('report.created', {
+      report: newReport
+    });
 
     res.status(201).json({
       status: 'success',

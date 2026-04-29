@@ -34,7 +34,7 @@ Authenticates an existing user and returns a session token.
 Authenticates via Google OAuth token.
 - **Access:** Public
 - **Body Payload (JSON):**
-  - `idToken` (String, **Required**): The JWT ID token obtained from Google Sign-In.
+  - `id_token` or `idToken` (String, **Required**): The JWT credential obtained from Google Identity Services.
 - **Returns:** `{ status: 'success', data: { user, token } }`
 
 ---
@@ -167,3 +167,57 @@ Allows a natural language query against active campus reports and zones.
   - `activeReports` (Array of Objects, *Optional*): Context array of current reports.
   - `zones` (Array of Objects, *Optional*): Context array of campus zones.
 - **Returns:** `{ status: 'success', data: "String response from Gemini" }`
+
+---
+
+## 7. Admin (`/api/admin`)
+*All Admin endpoints require a valid JWT for a user whose `users.role` is `admin`.*
+
+### `GET /api/admin/users`
+Lists users for role management.
+- **Access:** Private, Admin
+- **Returns:** `{ status: 'success', results: Int, data: [ ...users ] }`
+
+### `PATCH /api/admin/users/:userId/role`
+Assigns a role to a user.
+- **Access:** Private, Admin
+- **Body Payload (JSON):**
+  - `role` (String, **Required**): One of `student`, `staff`, `security`, `admin`.
+- **Returns:** `{ status: 'success', data: { ...updatedUser } }`
+
+### `PATCH /api/admin/reports/:reportId/status`
+Updates a report status from the admin panel.
+- **Access:** Private, Admin
+- **Body Payload (JSON):**
+  - `status` (String, **Required**): One of `pending`, `community`, `verified`, `critical`, `resolved`.
+- **Returns:** `{ status: 'success', data: { ...updatedReport } }`
+
+### `GET /api/admin/events?token=<jwt_token>`
+Opens a Server-Sent Events stream for realtime admin notifications. The token is passed as a query parameter because browser `EventSource` cannot send custom authorization headers.
+- **Access:** Private, Admin
+- **Events:** `connected`, `report.created`, `report.updated`, `announcement.created`, `user.role_updated`
+
+---
+
+## 8. Announcements (`/api/announcements`)
+
+### `GET /api/announcements`
+Fetches active announcements newest first.
+- **Access:** Public through backend API
+- **Returns:** `{ status: 'success', results: Int, data: [ ...announcements ] }`
+
+### `GET /api/announcements/events?token=<jwt_token>`
+Opens a Server-Sent Events stream for signed-in users. It only emits `announcement.created` events where `audience_role` is `all` or matches the user's role.
+- **Access:** Private
+- **Events:** `connected`, `announcement.created`
+
+### `POST /api/announcements`
+Creates an announcement and broadcasts it to the admin realtime stream.
+- **Access:** Private, Admin
+- **Body Payload (JSON):**
+  - `title` (String, **Required**): Max 120 characters.
+  - `body` (String, **Required**): Max 2000 characters.
+  - `priority` (String, *Optional*): `normal`, `important`, or `urgent`.
+  - `audienceRole` (String, *Optional*): `all`, `student`, `staff`, `security`, or `admin`.
+  - `expiresAt` (ISO8601 String, *Optional*): Optional expiry timestamp.
+- **Returns:** `{ status: 'success', data: { ...announcement } }`
