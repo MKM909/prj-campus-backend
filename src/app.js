@@ -13,6 +13,7 @@ const app = express();
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
+  'https://prj-campus-react-frontend.vercel.app',
   ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL] : [])
 ];
 
@@ -20,10 +21,20 @@ const allowedOrigins = [
 app.use(helmet()); // Security headers
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g. curl, Postman, mobile) and allowed origins
-    if (!origin || allowedOrigins.includes(origin)) {
+    // 1. Allow internal Vercel/Same-origin calls (no origin)
+    if (!origin) return callback(null, true);
+
+    // 2. Check against allowed list
+    const isAllowed = allowedOrigins.some(allowed => 
+      origin === allowed || origin.startsWith(allowed)
+    );
+
+    if (isAllowed) {
       callback(null, true);
     } else {
+      console.warn(`[CORS Blocked] Origin: ${origin}`);
+      // In production, we can be more permissive for debugging if needed:
+      // callback(null, true); 
       callback(new Error(`CORS: origin '${origin}' not allowed`));
     }
   },
