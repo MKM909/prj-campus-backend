@@ -141,12 +141,19 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const googleSignIn = async (req, res) => {
   const idToken = req.body.id_token || req.body.idToken;
 
+  console.log('[Google Auth] Attempting sign-in...');
+
   if (!idToken) {
+    console.error('[Google Auth] Missing ID Token in request body');
     return res.status(400).json({ status: 'error', message: 'Google ID Token is required' });
   }
 
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    console.error('[Google Auth] Configuration Error: GOOGLE_CLIENT_ID is not set in environment variables');
+    return res.status(500).json({ status: 'error', message: 'Server configuration error' });
+  }
+
   try {
-    // 1. Verify the Google ID Token
     const ticket = await googleClient.verifyIdToken({
       idToken,
       audience: process.env.GOOGLE_CLIENT_ID
@@ -156,6 +163,8 @@ const googleSignIn = async (req, res) => {
     const email = payload['email'];
     const displayName = payload['name'] || email.split('@')[0];
     const avatarUrl = payload['picture'];
+
+    console.log(`[Google Auth] Verified token for: ${email}`);
 
     // 2. Domain check (.edu.ng) — COMMENTED OUT FOR TESTING
     // TODO: Uncomment before production deployment
