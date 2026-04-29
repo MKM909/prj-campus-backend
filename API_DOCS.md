@@ -6,6 +6,7 @@ This document provides a perfectly detailed outline of all available endpoints o
 - **Base URL:** `/api` (e.g., `http://localhost:3000/api` or production URL)
 - **Content-Type:** `application/json`
 - **Global Rate Limiting:** Unless specified otherwise, endpoints are subject to a global rate limit of **100 requests per 15 minutes** per IP.
+  - *Exception:* The `/health` endpoint is exempt from rate limiting to facilitate dashboard monitoring.
 - **Authentication:** Endpoints marked as **Private** require an `Authorization` header containing a valid JWT.
   - Format: `Authorization: Bearer <jwt_token>`
 
@@ -221,3 +222,29 @@ Creates an announcement and broadcasts it to the admin realtime stream.
   - `audienceRole` (String, *Optional*): `all`, `student`, `staff`, `security`, or `admin`.
   - `expiresAt` (ISO8601 String, *Optional*): Optional expiry timestamp.
 - **Returns:** `{ status: 'success', data: { ...announcement } }`
+ 
+ ---
+ 
+ ## 9. System (`/health`)
+ 
+ ### `GET /health`
+ Provides a detailed status report of the backend system.
+ - **Access:** Public
+ - **Rate Limiting:** **Exempt** (Unlimited polling allowed)
+ - **Returns:**
+   ```json
+   {
+     "status": "UP",
+     "uptime": 123.456,
+     "timestamp": "2026-04-29T12:18:54.123Z",
+     "database": "CONNECTED",
+     "system": {
+       "node_version": "v22.12.0",
+       "memory_usage": "48MB",
+       "platform": "win32"
+     },
+     "cache": true
+   }
+   ```
+   - **database**: Can be `CONNECTED`, `DEGRADED` (API up, DB down), or `ERROR`.
+   - **cache**: Indicates if the database check was served from the 30-second internal cache.
