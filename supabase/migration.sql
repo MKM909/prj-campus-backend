@@ -24,6 +24,35 @@ CREATE TABLE IF NOT EXISTS public.users (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Existing projects may already have a public.users table. Ensure columns exist
+-- before constraints reference them.
+ALTER TABLE public.users
+  ADD COLUMN IF NOT EXISTS email TEXT,
+  ADD COLUMN IF NOT EXISTS password_hash TEXT,
+  ADD COLUMN IF NOT EXISTS display_name TEXT,
+  ADD COLUMN IF NOT EXISTS avatar_url TEXT,
+  ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'student',
+  ADD COLUMN IF NOT EXISTS department TEXT,
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS reliability_score FLOAT DEFAULT 5.0,
+  ADD COLUMN IF NOT EXISTS total_reports INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS confirmed_reports INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS false_reports INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS rank TEXT DEFAULT 'Newcomer',
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.users
+SET role = 'student'
+WHERE role IS NULL
+   OR role NOT IN ('student','staff','security','admin','super_admin','dept_admin','facilities','student_affairs','it_admin');
+
+UPDATE public.users
+SET status = 'active'
+WHERE status IS NULL
+   OR status NOT IN ('active', 'suspended', 'deleted');
+
 ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE public.users
   ADD CONSTRAINT users_role_check
@@ -75,6 +104,30 @@ CREATE TABLE IF NOT EXISTS public.zones (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.zones
+  ADD COLUMN IF NOT EXISTS slug TEXT,
+  ADD COLUMN IF NOT EXISTS name TEXT,
+  ADD COLUMN IF NOT EXISTS description TEXT,
+  ADD COLUMN IF NOT EXISTS polygon JSONB DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#4A90D9',
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'normal',
+  ADD COLUMN IF NOT EXISTS status_override TEXT,
+  ADD COLUMN IF NOT EXISTS status_override_reason TEXT,
+  ADD COLUMN IF NOT EXISTS status_overridden_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS status_overridden_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS centroid_lat DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS centroid_lng DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.zones
+SET status = 'normal'
+WHERE status IS NULL
+   OR status NOT IN ('normal', 'watch', 'alert', 'critical', 'maintenance', 'closed');
 
 ALTER TABLE public.zones DROP CONSTRAINT IF EXISTS zones_status_check;
 ALTER TABLE public.zones
@@ -136,6 +189,29 @@ CREATE TABLE IF NOT EXISTS public.reports (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.reports
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS zone_id UUID,
+  ADD COLUMN IF NOT EXISTS category TEXT,
+  ADD COLUMN IF NOT EXISTS title TEXT,
+  ADD COLUMN IF NOT EXISTS description TEXT,
+  ADD COLUMN IF NOT EXISTS photo_url TEXT,
+  ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 3.0,
+  ADD COLUMN IF NOT EXISTS reliability_score FLOAT DEFAULT 5.0,
+  ADD COLUMN IF NOT EXISTS ai_score FLOAT DEFAULT 5.0,
+  ADD COLUMN IF NOT EXISTS final_trust_score FLOAT DEFAULT 0.0,
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS corroborations INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS disputes INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.reports
+SET status = 'pending'
+WHERE status IS NULL
+   OR status NOT IN ('pending','community','verified','critical','resolved');
+
 -- 2. Create indexes for faster searching
 CREATE INDEX IF NOT EXISTS idx_reports_zone ON public.reports(zone_id);
 CREATE INDEX IF NOT EXISTS idx_reports_user ON public.reports(user_id);
@@ -172,6 +248,11 @@ ALTER TABLE public.reports
   ADD COLUMN IF NOT EXISTS ai_reasoning TEXT,
   ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
 
+UPDATE public.reports
+SET lifecycle_status = 'submitted'
+WHERE lifecycle_status IS NULL
+   OR lifecycle_status NOT IN ('submitted','acknowledged','in_progress','resolved');
+
 ALTER TABLE public.reports DROP CONSTRAINT IF EXISTS reports_lifecycle_status_check;
 ALTER TABLE public.reports
   ADD CONSTRAINT reports_lifecycle_status_check
@@ -186,6 +267,9 @@ CREATE INDEX IF NOT EXISTS idx_reports_specific_location ON public.reports(speci
 ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
 
 -- Reports: read all, insert any, update own
+DROP POLICY IF EXISTS "reports_select" ON public.reports;
+DROP POLICY IF EXISTS "reports_insert" ON public.reports;
+DROP POLICY IF EXISTS "reports_update" ON public.reports;
 CREATE POLICY "reports_select" ON public.reports FOR SELECT TO authenticated USING (true);
 CREATE POLICY "reports_insert" ON public.reports FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "reports_update" ON public.reports FOR UPDATE TO authenticated USING (auth.uid() = user_id);
@@ -342,6 +426,28 @@ CREATE TABLE IF NOT EXISTS public.sos_signals (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.sos_signals
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS exact_lat DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS exact_lng DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS first_acknowledged_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS first_acknowledged_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'open',
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.sos_signals
+SET status = 'open'
+WHERE status IS NULL
+   OR status NOT IN ('open','acknowledged','resolved','false_alarm');
+
+ALTER TABLE public.sos_signals DROP CONSTRAINT IF EXISTS sos_signals_status_check;
+ALTER TABLE public.sos_signals
+  ADD CONSTRAINT sos_signals_status_check
+  CHECK (status IN ('open','acknowledged','resolved','false_alarm'));
+
 CREATE INDEX IF NOT EXISTS idx_sos_signals_created ON public.sos_signals(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sos_signals_status ON public.sos_signals(status);
 
@@ -359,6 +465,29 @@ CREATE TABLE IF NOT EXISTS public.predictions (
   created_at TIMESTAMPTZ DEFAULT now(),
   expires_at TIMESTAMPTZ
 );
+
+ALTER TABLE public.predictions
+  ADD COLUMN IF NOT EXISTS zone_id UUID REFERENCES public.zones(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS category TEXT,
+  ADD COLUMN IF NOT EXISTS title TEXT,
+  ADD COLUMN IF NOT EXISTS reasoning TEXT,
+  ADD COLUMN IF NOT EXISTS occurrence_count INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS predicted_window JSONB,
+  ADD COLUMN IF NOT EXISTS confidence FLOAT DEFAULT 0.0,
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+UPDATE public.predictions
+SET status = 'active'
+WHERE status IS NULL
+   OR status NOT IN ('active','dismissed','completed');
+
+ALTER TABLE public.predictions DROP CONSTRAINT IF EXISTS predictions_status_check;
+ALTER TABLE public.predictions
+  ADD CONSTRAINT predictions_status_check
+  CHECK (status IN ('active','dismissed','completed'));
 
 CREATE INDEX IF NOT EXISTS idx_predictions_zone ON public.predictions(zone_id);
 CREATE INDEX IF NOT EXISTS idx_predictions_status ON public.predictions(status);
@@ -461,6 +590,17 @@ CREATE TABLE IF NOT EXISTS public.chats (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.chats
+  ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'group',
+  ADD COLUMN IF NOT EXISTS name TEXT,
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.chats
+SET type = 'group'
+WHERE type IS NULL
+   OR type NOT IN ('direct', 'group', 'community', 'zone', 'course');
+
 ALTER TABLE public.chats DROP CONSTRAINT IF EXISTS chats_type_check;
 ALTER TABLE public.chats
   ADD CONSTRAINT chats_type_check
@@ -522,6 +662,15 @@ CREATE TABLE IF NOT EXISTS public.chat_participants (
   PRIMARY KEY (chat_id, user_id)
 );
 
+ALTER TABLE public.chat_participants
+  ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'member',
+  ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.chat_participants
+SET role = 'member'
+WHERE role IS NULL
+   OR role NOT IN ('owner', 'admin', 'moderator', 'member');
+
 ALTER TABLE public.chat_participants DROP CONSTRAINT IF EXISTS chat_participants_role_check;
 ALTER TABLE public.chat_participants
   ADD CONSTRAINT chat_participants_role_check
@@ -542,6 +691,16 @@ ALTER TABLE public.chat_participants
   ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 
+UPDATE public.chat_participants
+SET status = 'active'
+WHERE status IS NULL
+   OR status NOT IN ('active', 'pending', 'left', 'removed');
+
+UPDATE public.chat_participants
+SET notification_level = 'all'
+WHERE notification_level IS NULL
+   OR notification_level NOT IN ('all', 'mentions', 'urgent', 'none');
+
 ALTER TABLE public.chat_participants DROP CONSTRAINT IF EXISTS chat_participants_status_check;
 ALTER TABLE public.chat_participants
   ADD CONSTRAINT chat_participants_status_check
@@ -560,6 +719,12 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
   body TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.chat_messages
+  ADD COLUMN IF NOT EXISTS chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS body TEXT,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 
 ALTER TABLE public.chat_messages ALTER COLUMN body DROP NOT NULL;
 
@@ -584,6 +749,26 @@ ALTER TABLE public.chat_messages
   ADD COLUMN IF NOT EXISTS suppressed_for_user_ids UUID[] DEFAULT '{}',
   ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.chat_messages
+SET type = 'text'
+WHERE type IS NULL
+   OR type NOT IN ('text', 'image', 'video', 'audio', 'document', 'sticker', 'poll', 'system', 'contact', 'location');
+
+UPDATE public.chat_messages
+SET message_status = 'sent'
+WHERE message_status IS NULL
+   OR message_status NOT IN ('queued', 'sending', 'sent', 'delivered', 'read', 'failed');
+
+UPDATE public.chat_messages
+SET delivery_state = 'sent'
+WHERE delivery_state IS NULL
+   OR delivery_state NOT IN ('queued', 'sent', 'partially_delivered', 'delivered', 'read', 'failed');
+
+UPDATE public.chat_messages
+SET delete_scope = NULL
+WHERE delete_scope IS NOT NULL
+  AND delete_scope NOT IN ('me', 'everyone');
 
 ALTER TABLE public.chat_messages DROP CONSTRAINT IF EXISTS chat_messages_type_check;
 ALTER TABLE public.chat_messages
@@ -668,6 +853,14 @@ CREATE TABLE IF NOT EXISTS public.chat_media_files (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.chat_media_files
+  ADD COLUMN IF NOT EXISTS upload_status TEXT DEFAULT 'pending';
+
+UPDATE public.chat_media_files
+SET upload_status = 'pending'
+WHERE upload_status IS NULL
+   OR upload_status NOT IN ('pending', 'uploading', 'completed', 'failed');
+
 ALTER TABLE public.chat_media_files DROP CONSTRAINT IF EXISTS chat_media_files_upload_status_check;
 ALTER TABLE public.chat_media_files
   ADD CONSTRAINT chat_media_files_upload_status_check
@@ -751,6 +944,17 @@ CREATE TABLE IF NOT EXISTS public.chat_join_requests (
   updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (chat_id, user_id)
 );
+
+ALTER TABLE public.chat_join_requests
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.chat_join_requests
+SET status = 'pending'
+WHERE status IS NULL
+   OR status NOT IN ('pending', 'approved', 'rejected');
 
 ALTER TABLE public.chat_join_requests DROP CONSTRAINT IF EXISTS chat_join_requests_status_check;
 ALTER TABLE public.chat_join_requests
@@ -1076,6 +1280,27 @@ CREATE TABLE IF NOT EXISTS public.announcements (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.announcements
+  ADD COLUMN IF NOT EXISTS title TEXT,
+  ADD COLUMN IF NOT EXISTS body TEXT,
+  ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal',
+  ADD COLUMN IF NOT EXISTS audience_role TEXT DEFAULT 'all',
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.announcements
+SET priority = 'normal'
+WHERE priority IS NULL
+   OR priority NOT IN ('normal', 'important', 'urgent', 'critical');
+
+UPDATE public.announcements
+SET audience_role = 'all'
+WHERE audience_role IS NULL
+   OR audience_role NOT IN ('all','student','staff','security','admin','super_admin','dept_admin','facilities','student_affairs','it_admin');
 
 CREATE INDEX IF NOT EXISTS idx_announcements_created_at ON public.announcements(created_at);
 CREATE INDEX IF NOT EXISTS idx_announcements_audience ON public.announcements(audience_role);
