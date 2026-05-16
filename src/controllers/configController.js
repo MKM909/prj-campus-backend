@@ -3,9 +3,15 @@
 // @access  Public
 const getPublicConfig = (req, res) => {
   try {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey =
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_PUBLISHABLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
     const config = {
-      supabaseUrl: process.env.SUPABASE_URL,
-      supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+      supabaseUrl,
+      supabaseAnonKey,
       cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
       cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,
       cloudinaryUploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET,

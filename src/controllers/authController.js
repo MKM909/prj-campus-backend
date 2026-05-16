@@ -141,8 +141,6 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const googleSignIn = async (req, res) => {
   const idToken = req.body.id_token || req.body.idToken;
 
-  console.log('[Google Auth] Attempting sign-in...');
-
   if (!idToken) {
     console.error('[Google Auth] Missing ID Token in request body');
     return res.status(400).json({ status: 'error', message: 'Google ID Token is required' });
@@ -164,16 +162,13 @@ const googleSignIn = async (req, res) => {
     const displayName = payload['name'] || email.split('@')[0];
     const avatarUrl = payload['picture'];
 
-    console.log(`[Google Auth] Verified token for: ${email}`);
-
-    // 2. Domain check (.edu.ng) — COMMENTED OUT FOR TESTING
-    // TODO: Uncomment before production deployment
-    // if (!email.endsWith('.edu.ng')) {
-    //   return res.status(403).json({
-    //     status: 'error',
-    //     message: 'Access Denied: Only school emails (.edu.ng) are allowed.'
-    //   });
-    // }
+    // 2. Domain check (.edu.ng)
+    if (!email.endsWith('.edu.ng')) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Access Denied: Only school emails (.edu.ng) are allowed.'
+      });
+    }
 
     // 3. Check if user exists in custom users table
     let { data: user, error: fetchError } = await supabase

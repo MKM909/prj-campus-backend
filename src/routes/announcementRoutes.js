@@ -10,8 +10,8 @@ const {
 
 const router = express.Router();
 
-const priorities = ['normal', 'important', 'urgent'];
-const audienceRoles = ['all', 'student', 'staff', 'security', 'admin'];
+const priorities = ['normal', 'important', 'urgent', 'critical'];
+const audienceRoles = ['all', 'student', 'staff', 'security', 'admin', 'super_admin', 'dept_admin', 'facilities', 'student_affairs', 'it_admin'];
 
 const announcementValidation = [
   body('title').notEmpty().withMessage('Title is required').isLength({ max: 120 }).trim().escape(),

@@ -91,44 +91,198 @@ Submits a new report. Automatically calculates `final_trust_score` and `status` 
 ---
 
 ## 5. Messaging (`/api/messages`)
-*All Messaging endpoints share a strict rate limit of **60 requests per 1 minute** per IP.*
+*All Messaging endpoints share a strict rate limit of **120 requests per 1 minute** per IP.*
 
-### `GET /api/messages/chats`
-Retrieves a list of all active chats (both Direct and Group) the authenticated user is a participant of.
+Messaging is now designed around the WhatsApp-style lifecycle used by the mobile app:
+`queued/sending` is local-only, then the backend persists `sent`, receipts advance messages to `delivered`, `read`, or `played`.
+Clients should create a local UUID/string `clientMessageId`, insert optimistically into Drift, POST to the backend, then reconcile with the returned server `id`.
+
+### Message Object Contract
+Returned messages include:
+- `id` (UUID): Server message ID.
+- `client_message_id` (String, Optional): Local optimistic/offline ID from the device.
+- `chat_id`, `sender_id`.
+- `body` (String, Nullable): Text/caption/sticker asset path. Nullable for media-only messages.
+- `type`: `text`, `image`, `video`, `audio`, `document`, `sticker`, `poll`, `system`, `contact`, or `location`.
+- `reply_to_id` (UUID, Nullable): Server message ID being replied to.
+- `reply_to_client_message_id` (String, Nullable): Offline/local reply reference when server ID is not known yet.
+- `message_status`: `queued`, `sending`, `sent`, `delivered`, `read`, or `failed`.
+- `delivery_state`: aggregate server state for the chat.
+- `edited_at`, `deleted_at`, `deleted_by`, `delete_scope`.
+- `is_forwarded`, `forwarded_from_message_id`, `forward_count`.
+- `mentions` (UUID Array): Users mentioned in the message.
+- `sent_via_mesh` (Boolean): True when the message originated from offline mesh relay.
+- `expires_at` (Timestamp, Nullable): Disappearing-message expiry.
+- `metadata` (Object): Flexible client metadata.
+- `chat_message_attachments[]`, `chat_message_reactions[]`, `chat_read_receipts[]`.
+- `users`: sender display metadata.
+
+### Chat Object Contract
+Chats support direct, group, community, zone, and course conversations:
+- `type`: `direct`, `group`, `community`, `zone`, or `course`.
+- `community_id`: parent community for subgroup chats.
+- `announcement_chat_id`: community-wide announcement channel for `community` chats.
+- `is_announcement_channel`: true for the generated admin-only community broadcast group.
+- `send_policy`: `all` or `admins`.
+- `edit_info_policy`: `all` or `admins`.
+- `pin_policy`: `all` or `admins`.
+- `join_approval_required`, `invite_enabled`, `invite_code`.
+- `community_member_visibility`: `subgroups` or `community_admins`.
+- `community_join_policy`: `admins` or `open`.
+- `max_subgroups`, `max_announcement_members`.
+- `disappearing_seconds`, `retention_days`.
+- `last_message_id`, `last_message_at`.
+- Participant-specific settings are stored on `chat_participants`: `role`, `notification_level`, `muted_until`, `is_pinned`, `is_archived`, `last_read_at`.
+
+### `GET /api/messages/events?token=<jwt>`
+Opens a persistent Server-Sent Events stream for the current Express JWT auth path.
+- **Access:** Private via query token.
+- **Events:** `connected`, `message.created`, `message.edited`, `message.deleted`, `message.receipts.updated`, `message.reaction.updated`, `message.group.updated`, `message.participant.added`, etc.
+- **Note:** Supabase Realtime publication is also enabled for messaging tables, but direct mobile subscriptions need auth alignment before replacing this backend-authenticated stream.
+
+### `GET /api/messages/chats?limit=50&cursor=<iso>&type=group`
+Lists the authenticated user's active chats with participant settings and unread count.
 - **Access:** Private
-- **Returns:** `{ status: 'success', data: [ { chat_id, joined_at, chats: { id, type, name, ... } } ] }`
+- **Returns:** `{ status, results, nextCursor, data: [ { chat_id, role, notification_level, unread_count, chats: {...} } ] }`
 
 ### `POST /api/messages/direct`
-Initiates a new 1-on-1 direct message chat. If a direct chat already exists between the two users, it safely returns the existing `chatId` instead of duplicating.
+Creates or returns an existing 1-on-1 chat.
 - **Access:** Private
-- **Body Payload (JSON):**
-  - `targetUserId` (UUID String, **Required**): ID of the user to chat with. Cannot be your own user ID.
-- **Returns:** `{ status: 'success', data: { chatId: "uuid" } }`
+- **Body:** `{ "targetUserId": "uuid", "name?": "Display fallback", "avatarUrl?": "https://..." }`
+- **Returns:** `{ status, data: { chatId, existing, chat? } }`
 
 ### `POST /api/messages/group`
-Creates a new group chat and automatically adds the creator as 'admin'.
+Creates a group/community/zone/course chat.
 - **Access:** Private
-- **Body Payload (JSON):**
-  - `name` (String, **Required**): Name of the group (Max 50 characters).
-  - `participantIds` (Array of UUID Strings, **Required**): IDs of the users to add to the group. The creator's ID is automatically handled and does not need to be in this array (but is safely ignored if included).
-- **Returns:** `{ status: 'success', data: { ...newChat } }`
+- **Body:**
+  ```json
+  {
+    "name": "CS301 Study Group",
+    "description": "Optional",
+    "type": "group",
+    "participantIds": ["uuid"],
+    "sendPolicy": "all",
+    "editInfoPolicy": "admins",
+    "pinPolicy": "admins",
+    "joinApprovalRequired": false,
+    "inviteEnabled": true,
+    "disappearingSeconds": null,
+    "retentionDays": 30,
+    "metadata": {}
+  }
+  ```
+- **Returns:** `{ status, data: { ...chat, participants } }`
 
-### `GET /api/messages/:chatId`
-Retrieves the most recent message history for a specific chat. Max 100 messages returned per call.
+### WhatsApp-Style Communities
+Communities are umbrella chats that contain one generated announcement channel and many linked subgroups.
+
+#### `POST /api/messages/community`
+Creates a community and an admin-only announcement channel.
 - **Access:** Private
-- **Path Parameters:**
-  - `chatId` (UUID String, **Required**): Extracted from the URL path.
-- **Returns:** `{ status: 'success', data: [ { id, sender_id, body, created_at, users: { display_name, avatar_url } } ] }`
+- **Body:**
+  ```json
+  {
+    "name": "Faculty of Engineering",
+    "description": "Faculty-wide updates and groups",
+    "participantIds": ["uuid"],
+    "communityMemberVisibility": "subgroups",
+    "communityJoinPolicy": "admins",
+    "maxSubgroups": 50,
+    "maxAnnouncementMembers": 2000,
+    "metadata": {}
+  }
+  ```
+- **Returns:** `{ status, data: { community, announcementChat, participants } }`
+
+#### `GET /api/messages/community/:communityId`
+Returns the community, current user's community role, announcement channel, visible subgroups, and memberships.
+
+#### `POST /api/messages/community/:communityId/groups`
+Creates a subgroup inside the community. Only community owner/admin/moderator can create.
+- **Body:** `{ "name": "CS301", "type": "group|zone|course", "participantIds": [], "sendPolicy": "all" }`
+
+#### `POST /api/messages/community/:communityId/groups/:chatId`
+Links an existing group/zone/course chat into the community. Requires admin rights in both the community and the target chat.
+
+#### `DELETE /api/messages/community/:communityId/groups/:chatId`
+Unlinks a subgroup from the community. Announcement channels cannot be unlinked through this endpoint.
+
+### `GET /api/messages/:chatId?limit=50&before=<iso>&after=<iso>`
+Retrieves paginated message history. Use `before` to load older messages.
+- **Access:** Private participant only.
+- **Returns:** `{ status, results, nextCursor, data: [ ...messagesAscending ] }`
 
 ### `POST /api/messages/:chatId`
-Sends a text message to a specific chat.
-- **Access:** Private
-- **Path Parameters:**
-  - `chatId` (UUID String, **Required**): Extracted from the URL path.
-- **Body Payload (JSON):**
-  - `body` (String, **Required**): The message content (Max 2000 characters). Automatically trimmed and escaped.
-- **Returns:** `{ status: 'success', data: { ...newMessage } }`
-- *Note:* Protected by Supabase Row Level Security. Returns HTTP `403 Forbidden` if the user attempts to send a message to a chat they are not a participant in.
+Sends a message. The backend accepts all current app mock fields plus lifecycle/media fields.
+- **Access:** Private participant only.
+- **Body:**
+  ```json
+  {
+    "id": "optional-client-id-or-server-uuid",
+    "clientMessageId": "device-local-id",
+    "body": "caption or text",
+    "type": "image",
+    "replyToId": "server-uuid-or-local-id",
+    "replyToClientMessageId": "local-id",
+    "attachmentUrl": "https://cdn.example/file.jpg",
+    "attachmentName": "lecture.pdf",
+    "attachmentSize": "2.4 MB",
+    "audioDuration": "00:59",
+    "attachments": [
+      {
+        "url": "https://cdn.example/file.jpg",
+        "thumbnailUrl": "https://cdn.example/thumb.jpg",
+        "fileHash": "sha256",
+        "mimeType": "image/jpeg",
+        "fileSize": 123456,
+        "type": "image"
+      }
+    ],
+    "mentions": ["uuid"],
+    "isForwarded": false,
+    "forwardCount": 0,
+    "sentViaMesh": false,
+    "metadata": {}
+  }
+  ```
+- **Blocking behavior:** if the recipient has blocked the sender in a direct chat, the API still returns success to the sender, but the message is suppressed for the recipient and will not be delivered/read.
+- **Returns:** `{ status, data: { ...message } }`
+
+### `PATCH /api/messages/:chatId/receipts`
+Marks messages as delivered, read, or played.
+- **Access:** Private participant only.
+- **Body:** `{ "status": "read", "messageIds": ["uuid"], "upToMessageId": "uuid" }`
+- **Returns:** `{ status, data: { messageIds, receiptStatus } }`
+
+### Message Actions
+- `PATCH /api/messages/message/:messageId`: edit body/content/text. Stores edit history.
+- `DELETE /api/messages/message/:messageId?scope=me|everyone`: delete for current user or everyone.
+- `POST /api/messages/message/:messageId/reactions`: `{ "emoji": "🔥" }`.
+- `DELETE /api/messages/message/:messageId/reactions`: remove current user's reaction.
+- `POST /api/messages/message/:messageId/star`: star/bookmark.
+- `DELETE /api/messages/message/:messageId/star`: unstar.
+
+### Pins, Settings, Groups, Invites
+- `POST /api/messages/:chatId/pins`: `{ "messageId": "uuid", "expiresAt?": "iso" }`. Max 3 active pins.
+- `DELETE /api/messages/:chatId/pins/:messageId`: unpin.
+- `PATCH /api/messages/:chatId/settings`: `{ "mutedUntil?", "notificationLevel": "all|mentions|urgent|none", "isPinned?", "isArchived?" }`.
+- `PATCH /api/messages/:chatId/group`: update group controls, name, description, send policy, pin policy, join approval, retention.
+- `POST /api/messages/:chatId/participants`: add participant or create join request.
+- `PATCH /api/messages/:chatId/participants/:userId`: update role/status/settings.
+- `DELETE /api/messages/:chatId/participants/:userId`: remove participant.
+- `PATCH /api/messages/:chatId/join-requests/:userId`: approve/reject.
+- `POST /api/messages/:chatId/invite/reset`: rotate invite code.
+- `POST /api/messages/invite/:inviteCode/join`: join or request access by invite.
+
+### Media Dedup / Upload Resume Metadata
+- `POST /api/messages/media`: looks up by `fileHash`; if missing, registers upload metadata.
+- `PATCH /api/messages/media/:mediaId`: updates `cdnUrl`, `thumbnailUrl`, `uploadStatus`, `uploadProgress`, `expiresAt`.
+- **Note:** File bytes still upload through the app's CDN/storage pipeline. This endpoint stores hashes, thumbnails, and upload state for dedupe/resume.
+
+### Blocks
+- `GET /api/messages/blocks`: list users blocked by current user.
+- `POST /api/messages/blocks`: `{ "blockedUserId": "uuid", "reason?": "spam" }`.
+- `DELETE /api/messages/blocks/:blockedUserId`: unblock.
 
 ---
 
@@ -172,7 +326,55 @@ Allows a natural language query against active campus reports and zones.
 ---
 
 ## 7. Admin (`/api/admin`)
-*All Admin endpoints require a valid JWT for a user whose `users.role` is `admin`.*
+*All Admin endpoints require a valid JWT for a user whose `users.role` is one of the supported admin roles.*
+
+The PRD admin backend now accepts the full admin role set:
+`admin`, `super_admin`, `dept_admin`, `facilities`, `security`, `student_affairs`, `it_admin`.
+Super-admin-only routes require `super_admin`.
+
+### PRD Dashboard Endpoints
+
+- `GET /api/admin/dashboard/stats`: command-centre health score, active counts, critical alerts, zone health grid, live feed.
+- `GET /api/admin/reports`: paginated/filterable report list. Query: `status`, `category`, `zoneId`, `lifecycle`, `date`, `from`, `to`, `search`, `page`, `limit`.
+- `GET /api/admin/reports/:id`: full report drawer payload with comments, lifecycle timeline, mentions, feedback, audit entries.
+- `PATCH /api/admin/reports/:id/lifecycle`: `{ "status": "acknowledged|in_progress|resolved", "note?": "..." }`.
+- `PATCH /api/admin/reports/:id/assign`: `{ "department": "facilities", "assigneeId?": "uuid", "note?": "..." }`.
+- `POST /api/admin/reports/:id/comments`: official admin/staff comment. Body: `{ "body": "...", "isOfficial": true }`.
+- `PATCH /api/admin/reports/:id/escalate`: escalates a report and records history/audit metadata.
+- `PATCH /api/admin/reports/:id/duplicate`: `{ "duplicateOf": "report-uuid", "note?": "..." }`.
+- `DELETE /api/admin/reports/:id`: delete report. Super admin only.
+- `GET /api/admin/zones`: zones with computed health scores, status bands, active counts.
+- `PATCH /api/admin/zones/:id/status`: override zone status. Body: `{ "status": "normal|watch|alert|critical|maintenance|closed", "reason?": "..." }`.
+- `GET /api/admin/analytics?range=this_month`: chart-ready analytics payload.
+- `GET /api/admin/sentiment`: derived mood score, tension index, trending concerns.
+- `GET /api/admin/sentiment/history`: stored tension-index snapshots.
+- `POST /api/admin/sentiment/snapshot`: captures the current mood/tension snapshot.
+- `GET /api/admin/predictions`: derived maintenance predictions/risk matrix.
+- `GET /api/admin/budget-evidence?zoneId=<uuid>&category=power`: TETFUND/budget evidence summary for a zone/category.
+- `GET /api/admin/incidents`: critical incident log.
+- `GET /api/admin/sos`: SOS history.
+- `GET /api/admin/broadcasts`: broadcast/announcement history.
+- `GET /api/admin/broadcasts/templates`: configured broadcast templates.
+- `POST /api/admin/broadcasts`: official broadcast. Body: `{ "title": "...", "body": "...", "priority": "normal|urgent|critical", "category": "maintenance_notice", "targetZoneId?": "uuid", "scheduledFor?": "iso" }`.
+- `POST /api/admin/broadcasts/process-scheduled`: sends due scheduled broadcasts. Use from Vercel Cron or a trusted admin job.
+- `GET /api/admin/inbox?tab=unacknowledged|in_progress|resolved`: department-scoped inbox.
+- `GET /api/admin/mentions`: department-scoped @mention feed.
+- `GET /api/admin/escalations`: escalation history scoped to the admin role.
+- `POST /api/admin/escalations/run`: runs the SLA escalation sweep. Use from Vercel Cron or a trusted admin job.
+- `GET /api/admin/notifications`: notification bell feed.
+- `PATCH /api/admin/notifications/:id/read`: marks one admin notification as read.
+- `GET /api/admin/users`: user management. Super admin only.
+- `POST /api/admin/users`: creates a staff/admin account. Super admin only. Requires `@unilorin.edu.ng` email and password.
+- `PATCH /api/admin/users/:id`: update role/reliability/department/status. Super admin only.
+- `POST /api/admin/users/:id/reliability-adjustments`: updates reliability score with a required reason and durable adjustment log.
+- `GET /api/admin/settings`: SLA, department, notification config. Super admin only.
+- `PATCH /api/admin/settings`: update admin settings. Super admin only.
+- `GET /api/admin/audit`: non-deletable admin action log. Super admin only.
+- `GET /api/admin/events?token=<jwt>` or `/api/admin/realtime?token=<jwt>`: SSE realtime admin events.
+
+### Report Fields Added For Admin
+
+Reports now support `exact_lat`, `exact_lng`, `specific_location`, `building_id`, `lifecycle_status`, acknowledge/in-progress/resolution timestamps, assignment fields, escalation level, duplicate linkage, and audit/history metadata.
 
 ### `GET /api/admin/users`
 Lists users for role management.

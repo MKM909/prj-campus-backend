@@ -9,12 +9,18 @@ const supabase = require('./config/supabase');
 
 const app = express();
 
-// Allowed origins: Vite dev server + optional production URL from env
+const parseOrigins = (value) => (value || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+// Allowed origins: Vite dev server + optional production URLs from env
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
   'https://prj-campus-react-frontend.vercel.app',
-  ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL] : [])
+  ...parseOrigins(process.env.CLIENT_URL),
+  ...parseOrigins(process.env.CLIENT_URLS)
 ];
 
 // 1. Basic Middleware
@@ -75,7 +81,7 @@ app.get('/health', async (req, res) => {
     healthStatus.cache = true;
   } else {
     try {
-      const { error } = await supabase.from('profiles').select('id', { count: 'exact', head: true }).limit(1);
+      const { error } = await supabase.from('users').select('id', { count: 'exact', head: true }).limit(1);
       if (error) {
         dbStatusCache = { status: 'DEGRADED', error: error.message };
       } else {
@@ -104,6 +110,7 @@ const reportRoutes = require('./routes/reportRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const announcementRoutes = require('./routes/announcementRoutes');
+const zoneRoutes = require('./routes/zoneRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -113,6 +120,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/announcements', announcementRoutes);
+app.use('/api/zones', zoneRoutes);
 
 
 // 4. 404 Handler

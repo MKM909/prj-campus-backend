@@ -1,10 +1,11 @@
-const jwt = require('jsonwebtoken');
 const supabase = require('../config/supabase');
+const { verifyAccessToken } = require('./auth');
+const { ADMIN_ROLES, SUPER_ADMIN_ROLES } = require('../services/adminIntelligenceService');
 
 const getCurrentUser = async (userId) => {
   const { data: user, error } = await supabase
     .from('users')
-    .select('id, email, display_name, role')
+    .select('*')
     .eq('id', userId)
     .single();
 
@@ -16,15 +17,15 @@ const requireAdmin = async (req, res, next) => {
   try {
     const user = await getCurrentUser(req.user.id);
 
-    // TEMPORARY BYPASS FOR TESTING
-    // if (!user || user.role !== 'admin') {
-    //   return res.status(403).json({
-    //     status: 'error',
-    //     message: 'Admin access required'
-    //   });
-    // }
+    if (!user || !ADMIN_ROLES.includes(user.role)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Admin access required'
+      });
+    }
 
     req.currentUser = user;
+    req.adminUser = user;
     return next();
   } catch (error) {
     console.error('Admin Check Error:', error.message);
@@ -33,6 +34,19 @@ const requireAdmin = async (req, res, next) => {
       message: 'Could not verify admin access'
     });
   }
+};
+
+const requireSuperAdmin = async (req, res, next) => {
+  const user = req.currentUser || req.adminUser;
+
+  if (!user || !SUPER_ADMIN_ROLES.includes(user.role)) {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Super admin access required'
+    });
+  }
+
+  return next();
 };
 
 const protectEventStream = async (req, res, next) => {
@@ -46,7 +60,15 @@ const protectEventStream = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = await verifyAccessToken(token);
+
+    if (!decoded) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Not authorized, token failed'
+      });
+    }
+
     req.user = decoded;
     return next();
   } catch (error) {
@@ -60,5 +82,6 @@ const protectEventStream = async (req, res, next) => {
 
 module.exports = {
   requireAdmin,
+  requireSuperAdmin,
   protectEventStream
 };

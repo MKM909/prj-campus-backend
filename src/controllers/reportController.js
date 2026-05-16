@@ -20,6 +20,16 @@ const createReport = async (req, res) => {
     photoUrl,
     isAnonymous,
     confidenceScore,
+    latitude,
+    longitude,
+    exactLat,
+    exactLng,
+    exact_lat,
+    exact_lng,
+    specificLocation,
+    specific_location,
+    buildingId,
+    building_id,
   } = req.body;
 
   // Use userId from the authenticated JWT (req.user)
@@ -51,6 +61,10 @@ const createReport = async (req, res) => {
 
     // If anonymous, set user_id to null to hide identity, but we still used their score
     const finalUserId = isAnonymous ? null : authUserId;
+    const resolvedLat = exactLat ?? exact_lat ?? latitude ?? null;
+    const resolvedLng = exactLng ?? exact_lng ?? longitude ?? null;
+    const resolvedBuildingId = buildingId ?? building_id ?? null;
+    const resolvedSpecificLocation = specificLocation ?? specific_location ?? null;
 
     const reportData = {
       user_id: finalUserId,
@@ -65,6 +79,13 @@ const createReport = async (req, res) => {
       ai_score: aiScore,
       final_trust_score: finalTrustScore,
       status: status,
+      latitude: resolvedLat,
+      longitude: resolvedLng,
+      exact_lat: resolvedLat,
+      exact_lng: resolvedLng,
+      specific_location: resolvedSpecificLocation,
+      building_id: resolvedBuildingId,
+      lifecycle_status: 'submitted',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
