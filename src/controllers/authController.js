@@ -136,25 +136,33 @@ const loginUser = async (req, res) => {
 // @route   POST /api/auth/google
 // @access  Public
 const { OAuth2Client } = require('google-auth-library');
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const googleClient = new OAuth2Client();
+
+const getGoogleClientIds = () => [
+  process.env.GOOGLE_CLIENT_ID,
+  ...(process.env.GOOGLE_CLIENT_IDS || '').split(',')
+]
+  .map(clientId => clientId && clientId.trim())
+  .filter(Boolean);
 
 const googleSignIn = async (req, res) => {
   const idToken = req.body.id_token || req.body.idToken;
+  const googleClientIds = getGoogleClientIds();
 
   if (!idToken) {
     console.error('[Google Auth] Missing ID Token in request body');
     return res.status(400).json({ status: 'error', message: 'Google ID Token is required' });
   }
 
-  if (!process.env.GOOGLE_CLIENT_ID) {
-    console.error('[Google Auth] Configuration Error: GOOGLE_CLIENT_ID is not set in environment variables');
+  if (!googleClientIds.length) {
+    console.error('[Google Auth] Configuration Error: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_IDS is not set');
     return res.status(500).json({ status: 'error', message: 'Server configuration error' });
   }
 
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience: googleClientIds
     });
     
     const payload = ticket.getPayload();
