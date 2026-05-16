@@ -14,14 +14,23 @@ const parseOrigins = (value) => (value || '')
   .map(origin => origin.trim())
   .filter(Boolean);
 
-// Allowed origins: Vite dev server + optional production URLs from env
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:4173',
-  'https://prj-campus-react-frontend.vercel.app',
+const normalizeOrigin = (origin) => {
+  try {
+    return new URL(origin).origin;
+  } catch {
+    return origin.replace(/\/$/, '');
+  }
+};
+
+const devOrigins = process.env.NODE_ENV === 'production'
+  ? []
+  : ['http://localhost:5173', 'http://localhost:4173', 'http://localhost:3000'];
+
+const allowedOrigins = new Set([
+  ...devOrigins,
   ...parseOrigins(process.env.CLIENT_URL),
   ...parseOrigins(process.env.CLIENT_URLS)
-];
+].map(normalizeOrigin));
 
 // 1. Basic Middleware
 app.use(helmet()); // Security headers
@@ -31,9 +40,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
 
     // 2. Check against allowed list
-    const isAllowed = allowedOrigins.some(allowed => 
-      origin === allowed || origin.startsWith(allowed)
-    );
+    const isAllowed = allowedOrigins.has(normalizeOrigin(origin));
 
     if (isAllowed) {
       callback(null, true);
