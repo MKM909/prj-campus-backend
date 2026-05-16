@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS public.users (
 -- Existing projects may already have a public.users table. Ensure columns exist
 -- before constraints reference them.
 ALTER TABLE public.users
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS email TEXT,
   ADD COLUMN IF NOT EXISTS password_hash TEXT,
   ADD COLUMN IF NOT EXISTS display_name TEXT,
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS public.zones (
 );
 
 ALTER TABLE public.zones
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS slug TEXT,
   ADD COLUMN IF NOT EXISTS name TEXT,
   ADD COLUMN IF NOT EXISTS description TEXT,
@@ -162,6 +164,18 @@ CREATE TABLE IF NOT EXISTS public.buildings (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.buildings
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS zone_id UUID REFERENCES public.zones(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS zone_slug TEXT,
+  ADD COLUMN IF NOT EXISTS name TEXT,
+  ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS osm_id TEXT,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_buildings_zone ON public.buildings(zone_id);
 CREATE INDEX IF NOT EXISTS idx_buildings_zone_slug ON public.buildings(zone_slug);
 
@@ -190,6 +204,7 @@ CREATE TABLE IF NOT EXISTS public.reports (
 );
 
 ALTER TABLE public.reports
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS zone_id UUID,
   ADD COLUMN IF NOT EXISTS category TEXT,
@@ -286,6 +301,17 @@ CREATE TABLE IF NOT EXISTS public.comments (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.comments
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS report_id UUID REFERENCES public.reports(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS body TEXT,
+  ADD COLUMN IF NOT EXISTS is_official BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS mentioned_departments TEXT[] DEFAULT ARRAY[]::TEXT[],
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_comments_report ON public.comments(report_id);
 CREATE INDEX IF NOT EXISTS idx_comments_mentions ON public.comments USING GIN(mentioned_departments);
 
@@ -298,6 +324,25 @@ CREATE TABLE IF NOT EXISTS public.report_status_history (
   metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.report_status_history
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS report_id UUID REFERENCES public.reports(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS lifecycle_status TEXT DEFAULT 'submitted',
+  ADD COLUMN IF NOT EXISTS changed_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS note TEXT,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.report_status_history
+SET lifecycle_status = 'submitted'
+WHERE lifecycle_status IS NULL
+   OR lifecycle_status NOT IN ('submitted','acknowledged','in_progress','resolved');
+
+ALTER TABLE public.report_status_history DROP CONSTRAINT IF EXISTS report_status_history_lifecycle_status_check;
+ALTER TABLE public.report_status_history
+  ADD CONSTRAINT report_status_history_lifecycle_status_check
+  CHECK (lifecycle_status IN ('submitted','acknowledged','in_progress','resolved'));
 
 CREATE INDEX IF NOT EXISTS idx_report_status_history_report ON public.report_status_history(report_id, created_at);
 
@@ -316,6 +361,30 @@ CREATE TABLE IF NOT EXISTS public.report_mentions (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.report_mentions
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS report_id UUID REFERENCES public.reports(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS comment_id UUID REFERENCES public.comments(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS department TEXT,
+  ADD COLUMN IF NOT EXISTS body TEXT,
+  ADD COLUMN IF NOT EXISTS response_status TEXT DEFAULT 'unseen',
+  ADD COLUMN IF NOT EXISTS routed_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS replied_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
+UPDATE public.report_mentions
+SET response_status = 'unseen'
+WHERE response_status IS NULL
+   OR response_status NOT IN ('unseen','seen','replied');
+
+ALTER TABLE public.report_mentions DROP CONSTRAINT IF EXISTS report_mentions_response_status_check;
+ALTER TABLE public.report_mentions
+  ADD CONSTRAINT report_mentions_response_status_check
+  CHECK (response_status IN ('unseen','seen','replied'));
+
 CREATE INDEX IF NOT EXISTS idx_report_mentions_department ON public.report_mentions(department, response_status);
 CREATE INDEX IF NOT EXISTS idx_report_mentions_report ON public.report_mentions(report_id);
 
@@ -327,6 +396,14 @@ CREATE TABLE IF NOT EXISTS public.resolution_feedback (
   note TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.resolution_feedback
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS report_id UUID REFERENCES public.reports(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS confirmed_resolved BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS note TEXT,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS idx_resolution_feedback_report ON public.resolution_feedback(report_id);
 
@@ -342,6 +419,17 @@ CREATE TABLE IF NOT EXISTS public.admin_audit_logs (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.admin_audit_logs
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS action_type TEXT,
+  ADD COLUMN IF NOT EXISTS resource_type TEXT,
+  ADD COLUMN IF NOT EXISTS resource_id UUID,
+  ADD COLUMN IF NOT EXISTS previous_state JSONB,
+  ADD COLUMN IF NOT EXISTS new_state JSONB,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_resource ON public.admin_audit_logs(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_admin ON public.admin_audit_logs(admin_id);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON public.admin_audit_logs(created_at DESC);
@@ -352,6 +440,14 @@ CREATE TABLE IF NOT EXISTS public.admin_settings (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.admin_settings
+  ADD COLUMN IF NOT EXISTS key TEXT,
+  ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_settings_key ON public.admin_settings(key);
 
 CREATE TABLE IF NOT EXISTS public.report_escalations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -365,6 +461,17 @@ CREATE TABLE IF NOT EXISTS public.report_escalations (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.report_escalations
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS report_id UUID REFERENCES public.reports(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS from_level INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS to_level INT DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS department TEXT,
+  ADD COLUMN IF NOT EXISTS reason TEXT,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_report_escalations_report ON public.report_escalations(report_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_report_escalations_department ON public.report_escalations(department);
 
@@ -377,6 +484,15 @@ CREATE TABLE IF NOT EXISTS public.reliability_adjustments (
   reason TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.reliability_adjustments
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS admin_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS previous_score FLOAT,
+  ADD COLUMN IF NOT EXISTS new_score FLOAT,
+  ADD COLUMN IF NOT EXISTS reason TEXT,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS idx_reliability_adjustments_user ON public.reliability_adjustments(user_id, created_at);
 
@@ -393,6 +509,18 @@ CREATE TABLE IF NOT EXISTS public.campus_intelligence_snapshots (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.campus_intelligence_snapshots
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS snapshot_type TEXT DEFAULT 'tension',
+  ADD COLUMN IF NOT EXISTS mood_score INT,
+  ADD COLUMN IF NOT EXISTS tension_index INT,
+  ADD COLUMN IF NOT EXISTS tension_status TEXT,
+  ADD COLUMN IF NOT EXISTS primary_driver TEXT,
+  ADD COLUMN IF NOT EXISTS affected_zone_ids UUID[] DEFAULT ARRAY[]::UUID[],
+  ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_campus_intelligence_snapshots_type_created ON public.campus_intelligence_snapshots(snapshot_type, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.admin_notifications (
@@ -408,6 +536,19 @@ CREATE TABLE IF NOT EXISTS public.admin_notifications (
   metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.admin_notifications
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS recipient_role TEXT,
+  ADD COLUMN IF NOT EXISTS recipient_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS type TEXT,
+  ADD COLUMN IF NOT EXISTS title TEXT,
+  ADD COLUMN IF NOT EXISTS body TEXT,
+  ADD COLUMN IF NOT EXISTS resource_type TEXT,
+  ADD COLUMN IF NOT EXISTS resource_id UUID,
+  ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS idx_admin_notifications_role ON public.admin_notifications(recipient_role, read_at);
 CREATE INDEX IF NOT EXISTS idx_admin_notifications_user ON public.admin_notifications(recipient_user_id, read_at);
@@ -427,6 +568,7 @@ CREATE TABLE IF NOT EXISTS public.sos_signals (
 );
 
 ALTER TABLE public.sos_signals
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS exact_lat DOUBLE PRECISION,
   ADD COLUMN IF NOT EXISTS exact_lng DOUBLE PRECISION,
@@ -467,6 +609,7 @@ CREATE TABLE IF NOT EXISTS public.predictions (
 );
 
 ALTER TABLE public.predictions
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS zone_id UUID REFERENCES public.zones(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS category TEXT,
   ADD COLUMN IF NOT EXISTS title TEXT,
@@ -591,6 +734,7 @@ CREATE TABLE IF NOT EXISTS public.chats (
 );
 
 ALTER TABLE public.chats
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'group',
   ADD COLUMN IF NOT EXISTS name TEXT,
   ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
@@ -663,6 +807,8 @@ CREATE TABLE IF NOT EXISTS public.chat_participants (
 );
 
 ALTER TABLE public.chat_participants
+  ADD COLUMN IF NOT EXISTS chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'member',
   ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ DEFAULT now();
 
@@ -721,6 +867,7 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
 );
 
 ALTER TABLE public.chat_messages
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS body TEXT,
@@ -827,6 +974,8 @@ CREATE TABLE IF NOT EXISTS public.chat_read_receipts (
 );
 
 ALTER TABLE public.chat_read_receipts
+  ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS played_at TIMESTAMPTZ,
@@ -854,7 +1003,22 @@ CREATE TABLE IF NOT EXISTS public.chat_media_files (
 );
 
 ALTER TABLE public.chat_media_files
-  ADD COLUMN IF NOT EXISTS upload_status TEXT DEFAULT 'pending';
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS file_hash TEXT,
+  ADD COLUMN IF NOT EXISTS encrypted_hash TEXT,
+  ADD COLUMN IF NOT EXISTS cdn_url TEXT,
+  ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+  ADD COLUMN IF NOT EXISTS file_name TEXT,
+  ADD COLUMN IF NOT EXISTS file_size BIGINT,
+  ADD COLUMN IF NOT EXISTS mime_type TEXT,
+  ADD COLUMN IF NOT EXISTS uploaded_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS upload_status TEXT DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS upload_session_id TEXT,
+  ADD COLUMN IF NOT EXISTS upload_progress NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 
 UPDATE public.chat_media_files
 SET upload_status = 'pending'
@@ -889,6 +1053,28 @@ CREATE TABLE IF NOT EXISTS public.chat_message_attachments (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.chat_message_attachments
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS media_id UUID REFERENCES public.chat_media_files(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'document',
+  ADD COLUMN IF NOT EXISTS cdn_url TEXT,
+  ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+  ADD COLUMN IF NOT EXISTS file_name TEXT,
+  ADD COLUMN IF NOT EXISTS file_size BIGINT,
+  ADD COLUMN IF NOT EXISTS file_size_label TEXT,
+  ADD COLUMN IF NOT EXISTS mime_type TEXT,
+  ADD COLUMN IF NOT EXISTS file_hash TEXT,
+  ADD COLUMN IF NOT EXISTS encrypted_hash TEXT,
+  ADD COLUMN IF NOT EXISTS upload_session_id TEXT,
+  ADD COLUMN IF NOT EXISTS upload_status TEXT DEFAULT 'completed',
+  ADD COLUMN IF NOT EXISTS duration_ms INT,
+  ADD COLUMN IF NOT EXISTS duration_label TEXT,
+  ADD COLUMN IF NOT EXISTS width INT,
+  ADD COLUMN IF NOT EXISTS height INT,
+  ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
 CREATE TABLE IF NOT EXISTS public.chat_message_reactions (
   message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
@@ -897,6 +1083,13 @@ CREATE TABLE IF NOT EXISTS public.chat_message_reactions (
   updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (message_id, user_id)
 );
+
+ALTER TABLE public.chat_message_reactions
+  ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS emoji TEXT,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS public.chat_message_edits (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -907,6 +1100,14 @@ CREATE TABLE IF NOT EXISTS public.chat_message_edits (
   edited_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE public.chat_message_edits
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS editor_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS previous_body TEXT,
+  ADD COLUMN IF NOT EXISTS new_body TEXT,
+  ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ DEFAULT now();
+
 CREATE TABLE IF NOT EXISTS public.chat_message_deletions (
   message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
@@ -914,12 +1115,22 @@ CREATE TABLE IF NOT EXISTS public.chat_message_deletions (
   PRIMARY KEY (message_id, user_id)
 );
 
+ALTER TABLE public.chat_message_deletions
+  ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT now();
+
 CREATE TABLE IF NOT EXISTS public.chat_message_stars (
   message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (message_id, user_id)
 );
+
+ALTER TABLE public.chat_message_stars
+  ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS public.chat_message_pins (
   chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
@@ -932,6 +1143,16 @@ CREATE TABLE IF NOT EXISTS public.chat_message_pins (
   updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (chat_id, message_id)
 );
+
+ALTER TABLE public.chat_message_pins
+  ADD COLUMN IF NOT EXISTS chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS pinned_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS unpinned_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS unpinned_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS public.chat_join_requests (
   chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
@@ -946,6 +1167,10 @@ CREATE TABLE IF NOT EXISTS public.chat_join_requests (
 );
 
 ALTER TABLE public.chat_join_requests
+  ADD COLUMN IF NOT EXISTS chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS requested_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending',
   ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
@@ -969,6 +1194,17 @@ CREATE TABLE IF NOT EXISTS public.user_blocks (
   PRIMARY KEY (blocker_id, blocked_id),
   CHECK (blocker_id <> blocked_id)
 );
+
+ALTER TABLE public.user_blocks
+  ADD COLUMN IF NOT EXISTS blocker_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS blocked_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS reason TEXT,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
+ALTER TABLE public.user_blocks DROP CONSTRAINT IF EXISTS user_blocks_blocker_id_blocked_id_check;
+ALTER TABLE public.user_blocks
+  ADD CONSTRAINT user_blocks_blocker_id_blocked_id_check
+  CHECK (blocker_id IS NULL OR blocked_id IS NULL OR blocker_id <> blocked_id);
 
 CREATE INDEX IF NOT EXISTS idx_chats_last_message_at ON public.chats(last_message_at);
 CREATE INDEX IF NOT EXISTS idx_chats_invite_code ON public.chats(invite_code);
@@ -1282,6 +1518,7 @@ CREATE TABLE IF NOT EXISTS public.announcements (
 );
 
 ALTER TABLE public.announcements
+  ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS title TEXT,
   ADD COLUMN IF NOT EXISTS body TEXT,
   ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal',
